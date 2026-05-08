@@ -39,7 +39,6 @@ predates that range.
 | File | Purpose |
 | --- | --- |
 | `test_cve_2026_31431.py` | Non-destructive detector. Operates on a sentinel file in a temp dir; never touches system binaries. |
-| `exploit_cve_2026_31431.py` | LPE. Flips the running user's UID to 0 in `/etc/passwd`'s page cache, then invokes `su` for a root shell. |
 
 Both scripts are pure Python 3.10+ stdlib.
 
@@ -49,9 +48,6 @@ Both scripts are pure Python 3.10+ stdlib.
 # 1. Detect
 python3 test_cve_2026_31431.py
 #   exit 0 = not vulnerable, 2 = vulnerable, 1 = test error
-
-# 2. Exploit (interactive — su will prompt for your own password)
-python3 exploit_cve_2026_31431.py --shell
 ```
 
 ## Detector usage
@@ -86,59 +82,6 @@ Output classes:
 The detector never touches `/usr/bin/su`, `/etc/passwd`, or any other
 file outside the temp directory it creates, and that file is removed on
 exit.
-
-## LPE usage
-
-```
-python3 exploit_cve_2026_31431.py            # patch only, print next steps
-python3 exploit_cve_2026_31431.py --shell    # patch and exec `su <user>`
-```
-
-What it does:
-
-1. Looks up the running user's UID line in `/etc/passwd` and finds the
-   byte offset of the 4-character UID field.
-2. Issues one `write4` against that offset, replacing the UID with
-   `0000`.
-3. Calls `pwd.getpwnam(user)` to confirm libc now reports UID 0.
-4. With `--shell`, `execvp("su", ["su", user])`. Enter your own
-   password. PAM validates against `/etc/shadow` (untouched), then
-   `setuid(getpwnam(user).pw_uid)` lands at 0.
-
-### Requirements
-
-- Running user has a 4-digit UID (1000–9999). 1- to 3-digit UIDs
-  require multi-shot writes — extend `write4` accordingly.
-- No NSS caching daemon (`nscd`, `sssd`, `systemd-userdbd`) is masking
-  `/etc/passwd` reads. If `getpwnam` still returns the real UID after
-  the patch, restart or bypass the cache, or pick a different user.
-- `/etc/passwd` page must remain in cache between the patch and the
-  `su` exec. In practice this is reliable on any system with normal
-  memory pressure.
-
-### Reverting
-
-The on-disk `/etc/passwd` is unchanged.
-
-**Dry-run** (`exploit_cve_2026_31431.py` without `--shell`) auto-evicts
-the corrupted page on exit via `POSIX_FADV_DONTNEED`, so UID→name
-lookups go back to normal immediately.
-
-**After `--shell`**, the page is left corrupted until you clear it.
-While it is corrupted, anything resolving UID 1000 → name (e.g. `ls`,
-file managers, scp/sftp ownership checks) will fail or show numeric
-IDs. To clear:
-
-```sh
-# unprivileged - request page-cache eviction for /etc/passwd:
-python3 -c "import os; fd=os.open('/etc/passwd', os.O_RDONLY); \
-            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED); os.close(fd)"
-
-# from the root shell:
-echo 3 > /proc/sys/vm/drop_caches
-```
-
-A reboot also clears it.
 
 ## How `write4` works
 
