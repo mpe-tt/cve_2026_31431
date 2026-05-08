@@ -156,7 +156,8 @@ def main() -> int:
               f"6.12/6.17/6.18 lines; trigger may not apply even if "
               f"prerequisites match.")
 
-    if algif_aead_loaded():
+    module_was_loaded = algif_aead_loaded()
+    if module_was_loaded:
         print("[i] algif_aead module is already loaded.")
     else:
         print("[i] algif_aead module is NOT currently loaded.")
@@ -205,6 +206,9 @@ def main() -> int:
               f"page-cache page at offset {marker_off}.")
         print(f"[!]   Surrounding bytes: {ctx.hex()}  ({ctx!r})")
         print(f"[!] Apply the upstream fix or block algif_aead immediately.")
+        if not module_was_loaded:
+            print("[i] algif_aead was loaded by this run. Unload it when done: "
+                  "sudo rmmod algif_aead (or ask your administrator).")
         return 2
 
     if diffs:
@@ -218,9 +222,15 @@ def main() -> int:
               f"AEAD destination scatterlist.")
         print(f"[!]   Treat as VULNERABLE to the underlying bug class until "
               f"a patched kernel is installed.")
+        if not module_was_loaded:
+            print("[i] algif_aead was loaded by this run. Unload it when done: "
+                  "sudo rmmod algif_aead (or ask your administrator).")
         return 2
 
     print("[+] Page cache intact. NOT vulnerable on this kernel.")
+    if not module_was_loaded:
+        print("[i] algif_aead was loaded by this run. Unload it when done: "
+              "sudo rmmod algif_aead (or ask your administrator).")
     return 0
 
 
