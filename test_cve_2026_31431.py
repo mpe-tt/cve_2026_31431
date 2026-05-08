@@ -10,7 +10,9 @@
 #   * Operates on a sentinel file the running user just created. /usr/bin/su
 #     and other system binaries are NOT touched.
 #   * Page-cache corruption is in-memory only; nothing is written back to disk.
-#   * Exit 0 = NOT vulnerable, 2 = VULNERABLE, 1 = test error.
+#   * Exit 0 = NOT vulnerable (or module not loaded and --load-module not passed),
+#     2 = VULNERABLE, 1 = test error.
+#   * Pass --load-module to allow autoloading algif_aead if not already present.
 #
 # Use only on hosts you own or are explicitly authorized to test.
 
@@ -142,24 +144,20 @@ def attempt_trigger(target_path: str) -> tuple[bool, bytes]:
 
 
 def main() -> int:
+    allow_load = "--load-module" in sys.argv[1:]
+
     log(f"[*] CVE-2026-31431 detector  kernel={os.uname().release}  "
         f"arch={os.uname().machine}")
 
     module_was_loaded = algif_aead_loaded()
     if module_was_loaded:
         log("[i] algif_aead module is already loaded.")
+    elif allow_load:
+        log("[i] algif_aead module is NOT currently loaded; will load via AF_ALG bind.")
     else:
         log("[i] algif_aead module is NOT currently loaded.")
-        log("[i] Proceeding will cause the kernel to load it automatically.")
-        sys.stderr.write("[?] Load algif_aead and continue? [y/N] ")
-        sys.stderr.flush()
-        try:
-            answer = sys.stdin.readline().strip().lower()
-        except EOFError:
-            answer = ""
-        if answer != "y":
-            log("[*] Aborted.")
-            return 0
+        log("[i] Pass --load-module to allow loading it and proceed with detection.")
+        return 0
 
     reason = precheck()
     if reason:
