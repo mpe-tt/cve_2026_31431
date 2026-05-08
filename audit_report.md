@@ -28,13 +28,13 @@ s.bind(("aead", ALG_NAME))
 s.close()
 ```
 
-Binding an AF_ALG socket to `"aead"` causes the kernel to autoload the `algif_aead` module if it is not already present. Once loaded, it stays resident until explicitly unloaded. The detector documents no such side effect.
+Binding an AF_ALG socket to `"aead"` causes the kernel to autoload the `algif_aead` module if it is not already present. Once loaded, it stays resident until explicitly unloaded.
 
 On a system where the administrator has not yet applied the `modprobe` mitigation, this behavior is expected and harmless — the module was already loadable. However, in an auditing workflow where the operator intends to check vulnerability *before* deciding whether to block the module, the act of checking is itself the thing that loads it, slightly widening the window.
 
 The secondary risk: on very locked-down systems, the unexpected module load may appear in audit logs and be misattributed.
 
-**Recommendation:** Document this side effect in the script header and in README. Optionally, check `/proc/modules` or `/sys/module/algif_aead` before `precheck()` and warn if the module is about to be loaded for the first time.
+**Mitigations applied:** The detector now checks `/sys/module/algif_aead` before calling `precheck()`. If the module is already loaded, it says so and proceeds. If it is not loaded, it prints a warning that the module will be autoloaded and prompts `[y/N]` for explicit confirmation; answering anything other than `y` aborts with exit 0. Additionally, if the module was loaded by the run, a reminder to unload it (`sudo rmmod algif_aead`) is printed alongside every detection result.
 
 ---
 
@@ -123,7 +123,7 @@ One edge case: if the kernel blocks `splice` into AF_ALG sockets (`EOPNOTSUPP`) 
 | # | Severity | Title | Status |
 |---|---|---|---|
 | 1 | Medium | `kernel_in_affected_line()` inverts affected/fixed terminology | Resolved — function removed |
-| 2 | Low | Running detector loads `algif_aead` module as a side effect | Open |
+| 2 | Low | Running detector loads `algif_aead` module as a side effect | Mitigated — prompt + rmmod reminder added |
 | 3 | Low | Resource leaks in `attempt_trigger()` on non-`OSError` exceptions | Open |
 | 4 | Info | Socket not explicitly closed on `bind()` failure in `precheck()` | Open |
 
