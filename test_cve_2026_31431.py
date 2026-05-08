@@ -183,7 +183,8 @@ def main() -> int:
     else:
         log("[i] algif_aead module is NOT currently loaded.")
         log("[i] Pass --load-module to allow loading it and proceed with detection.")
-        return 0
+        print("UNKNOWN")
+        return 125
 
     reason = precheck()
     if reason:
