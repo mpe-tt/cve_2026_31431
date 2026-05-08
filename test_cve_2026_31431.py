@@ -45,6 +45,10 @@ def build_authenc_keyblob(authkey: bytes, enckey: bytes) -> bytes:
     return rtattr + keyparam + authkey + enckey
 
 
+def log(msg: str) -> None:
+    print(msg, file=sys.stderr)
+
+
 def algif_aead_loaded() -> bool:
     return os.path.isdir("/sys/module/algif_aead")
 
@@ -138,35 +142,38 @@ def attempt_trigger(target_path: str) -> tuple[bool, bytes]:
 
 
 def main() -> int:
-    print(f"[*] CVE-2026-31431 detector  kernel={os.uname().release}  "
-          f"arch={os.uname().machine}")
+    log(f"[*] CVE-2026-31431 detector  kernel={os.uname().release}  "
+        f"arch={os.uname().machine}")
 
     module_was_loaded = algif_aead_loaded()
     if module_was_loaded:
-        print("[i] algif_aead module is already loaded.")
+        log("[i] algif_aead module is already loaded.")
     else:
-        print("[i] algif_aead module is NOT currently loaded.")
-        print("[i] Proceeding will cause the kernel to load it automatically.")
+        log("[i] algif_aead module is NOT currently loaded.")
+        log("[i] Proceeding will cause the kernel to load it automatically.")
+        sys.stderr.write("[?] Load algif_aead and continue? [y/N] ")
+        sys.stderr.flush()
         try:
-            answer = input("[?] Load algif_aead and continue? [y/N] ").strip().lower()
+            answer = sys.stdin.readline().strip().lower()
         except EOFError:
             answer = ""
         if answer != "y":
-            print("[*] Aborted.")
+            log("[*] Aborted.")
             return 0
 
     reason = precheck()
     if reason:
-        print(f"[+] Precondition not met ({reason}). NOT vulnerable.")
+        log(f"[+] Precondition not met ({reason}). NOT vulnerable.")
+        print("NOT VULNERABLE")
         return 0
-    print(f"[+] AF_ALG + {ALG_NAME!r} loadable - precondition met.")
+    log(f"[+] AF_ALG + {ALG_NAME!r} loadable - precondition met.")
 
     tmp = tempfile.mkdtemp(prefix="copyfail-")
     target = os.path.join(tmp, "sentinel.bin")
     try:
         after, sentinel = attempt_trigger(target)
     except Exception as e:
-        print(f"[!] Trigger failed: {type(e).__name__}: {e}")
+        log(f"[!] Trigger failed: {type(e).__name__}: {e}")
         return 1
     finally:
         try:
@@ -186,36 +193,39 @@ def main() -> int:
 
     if marker_off >= 0 and marker_orig < 0:
         ctx = after[max(marker_off - 4, 0):marker_off + 12]
-        print(f"[!] VULNERABLE to CVE-2026-31431.")
-        print(f"[!]   Marker {MARKER!r} (AAD seqno_lo) landed in the spliced "
-              f"page-cache page at offset {marker_off}.")
-        print(f"[!]   Surrounding bytes: {ctx.hex()}  ({ctx!r})")
-        print(f"[!] Apply the upstream fix or block algif_aead immediately.")
+        log(f"[!] VULNERABLE to CVE-2026-31431.")
+        log(f"[!]   Marker {MARKER!r} (AAD seqno_lo) landed in the spliced "
+            f"page-cache page at offset {marker_off}.")
+        log(f"[!]   Surrounding bytes: {ctx.hex()}  ({ctx!r})")
+        log(f"[!] Apply the upstream fix or block algif_aead immediately.")
         if not module_was_loaded:
-            print("[i] algif_aead was loaded by this run. Unload it when done: "
-                  "sudo rmmod algif_aead (or ask your administrator).")
+            log("[i] algif_aead was loaded by this run. Unload it when done: "
+                "sudo rmmod algif_aead (or ask your administrator).")
+        print("VULNERABLE")
         return 2
 
     if diffs:
         first = diffs[0]
         window = after[first:first + 16]
-        print(f"[!] Page cache MODIFIED via in-place AEAD splice path "
-              f"({len(diffs)} bytes changed, first at offset {first}).")
-        print(f"[!]   Window: {window.hex()}")
-        print(f"[!]   The controllable scratch-write marker did not land, but "
-              f"the kernel still allowed a page-cache page into the writable "
-              f"AEAD destination scatterlist.")
-        print(f"[!]   Treat as VULNERABLE to the underlying bug class until "
-              f"a patched kernel is installed.")
+        log(f"[!] Page cache MODIFIED via in-place AEAD splice path "
+            f"({len(diffs)} bytes changed, first at offset {first}).")
+        log(f"[!]   Window: {window.hex()}")
+        log(f"[!]   The controllable scratch-write marker did not land, but "
+            f"the kernel still allowed a page-cache page into the writable "
+            f"AEAD destination scatterlist.")
+        log(f"[!]   Treat as VULNERABLE to the underlying bug class until "
+            f"a patched kernel is installed.")
         if not module_was_loaded:
-            print("[i] algif_aead was loaded by this run. Unload it when done: "
-                  "sudo rmmod algif_aead (or ask your administrator).")
+            log("[i] algif_aead was loaded by this run. Unload it when done: "
+                "sudo rmmod algif_aead (or ask your administrator).")
+        print("VULNERABLE")
         return 2
 
-    print("[+] Page cache intact. NOT vulnerable on this kernel.")
+    log("[+] Page cache intact. NOT vulnerable on this kernel.")
     if not module_was_loaded:
-        print("[i] algif_aead was loaded by this run. Unload it when done: "
-              "sudo rmmod algif_aead (or ask your administrator).")
+        log("[i] algif_aead was loaded by this run. Unload it when done: "
+            "sudo rmmod algif_aead (or ask your administrator).")
+    print("NOT VULNERABLE")
     return 0
 
 
