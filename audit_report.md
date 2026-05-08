@@ -8,38 +8,13 @@
 
 ## Summary
 
-The detector is fundamentally sound: its containment boundary is solid, and the behavioral detection logic correctly identifies the page-cache scratch-write primitive. No path was found by which the script can corrupt files outside the user-owned temp directory it creates. Four findings are documented below, ordered by severity.
+The detector is fundamentally sound: its containment boundary is solid, and the behavioral detection logic correctly identifies the page-cache scratch-write primitive. No path was found by which the script can corrupt files outside the user-owned temp directory it creates. Three findings are documented below, ordered by severity. Finding 1 from the original report (`kernel_in_affected_line()` misleading message) has been resolved by removing the function and its call site.
 
 ---
 
-## Finding 1 — Medium: `kernel_in_affected_line()` message inverts affected/fixed terminology
+## ~~Finding 1 — Medium: `kernel_in_affected_line()` message inverts affected/fixed terminology~~ — RESOLVED
 
-**Lines:** 136–144, 150–153
-
-```python
-def kernel_in_affected_line() -> bool:
-    ...
-    return (major, minor) >= (6, 12)
-```
-
-```python
-if not kernel_in_affected_line():
-    print(f"[i] Kernel {os.uname().release} predates the affected "
-          f"6.12/6.17/6.18 lines; trigger may not apply even if "
-          f"prerequisites match.")
-```
-
-**Problem:** The function returns `True` for kernels ≥ 6.12 — the *fixed* versions. The warning fires for kernels *below* 6.12, calling them kernels that "predate the affected 6.12/6.17/6.18 lines." This inverts the meaning: 6.12/6.17/6.18 are the *fixed* lines, not the *affected* ones. A user on, say, 5.15 LTS reads the message and may conclude their kernel is too old to be at risk, when in fact kernels from ~4.14 through 6.11 are the affected range.
-
-There is a second logic gap: the check has no lower bound. Kernels predating commit `72548b093ee3` (2017, ~4.14) never had the bug. The function returns `False` for those too, emitting the same misleading message.
-
-The good news is that this function does not gate actual detection — the behavioral test in `attempt_trigger()` is the authoritative result, so this cannot produce a false negative. The risk is that the informational message misleads a reader into dismissing a genuinely vulnerable system before the behavioral test runs.
-
-**Recommendation:** Rename the function to `kernel_may_be_fixed()` or similar, and rewrite the message to correctly identify 6.12/6.17/6.18 as the fix lines:
-
-```
-[i] Kernel predates fix lines (6.12/6.17/6.18); proceed to behavioral check.
-```
+The `kernel_in_affected_line()` function and its call site in `main()` have been removed. The behavioral test in `attempt_trigger()` is the sole and authoritative detection mechanism; no kernel-version heuristic is needed.
 
 ---
 
@@ -145,11 +120,11 @@ One edge case: if the kernel blocks `splice` into AF_ALG sockets (`EOPNOTSUPP`) 
 
 ## Findings Summary
 
-| # | Severity | Title |
-|---|---|---|
-| 1 | Medium | `kernel_in_affected_line()` inverts affected/fixed terminology |
-| 2 | Low | Running detector loads `algif_aead` module as a side effect |
-| 3 | Low | Resource leaks in `attempt_trigger()` on non-`OSError` exceptions |
-| 4 | Info | Socket not explicitly closed on `bind()` failure in `precheck()` |
+| # | Severity | Title | Status |
+|---|---|---|---|
+| 1 | Medium | `kernel_in_affected_line()` inverts affected/fixed terminology | Resolved — function removed |
+| 2 | Low | Running detector loads `algif_aead` module as a side effect | Open |
+| 3 | Low | Resource leaks in `attempt_trigger()` on non-`OSError` exceptions | Open |
+| 4 | Info | Socket not explicitly closed on `bind()` failure in `precheck()` | Open |
 
 No path to privilege escalation or unintended file corruption was found in the detector.

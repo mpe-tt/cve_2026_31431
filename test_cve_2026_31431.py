@@ -137,24 +137,9 @@ def attempt_trigger(target_path: str) -> tuple[bool, bytes]:
     return after, sentinel
 
 
-def kernel_in_affected_line() -> bool:
-    # Per the disclosure, fixes landed on the 6.12, 6.17 and 6.18 stable lines.
-    rel = os.uname().release.split("-")[0]
-    parts = rel.split(".")
-    try:
-        major, minor = int(parts[0]), int(parts[1])
-    except (ValueError, IndexError):
-        return False
-    return (major, minor) >= (6, 12)
-
-
 def main() -> int:
     print(f"[*] CVE-2026-31431 detector  kernel={os.uname().release}  "
           f"arch={os.uname().machine}")
-    if not kernel_in_affected_line():
-        print(f"[i] Kernel {os.uname().release} predates the affected "
-              f"6.12/6.17/6.18 lines; trigger may not apply even if "
-              f"prerequisites match.")
 
     module_was_loaded = algif_aead_loaded()
     if module_was_loaded:
