@@ -56,6 +56,13 @@ sudo rmmod algif_aead 2>/dev/null
 
 After applying, the detector should print `NOT VULNERABLE` and exit 0.
 
+> **Note:** These instructions apply to distros where `algif_aead` is a
+> loadable module (Debian, Ubuntu, SUSE, Amazon Linux). On RHEL ≤ 9 the
+> module may be absent or built into the kernel, in which case the
+> `modprobe.d` override and `rmmod` have no effect. Consult your
+> distribution's security advisory for guidance specific to your
+> platform.
+
 The upstream fix reverts in-place AEAD operations to out-of-place,
 keeping page-cache pages out of writable scatterlists.
 
