@@ -13,14 +13,20 @@ python3 test_cve_2026_31431.py [--load-module]
 
 Requires Python 3.6+. No third-party dependencies.
 
-stdout receives one line: `VULNERABLE` (exit 2) or `NOT VULNERABLE`
-(exit 0). All diagnostic output goes to stderr. Exit 1 means the test
-itself failed.
+stdout receives one line indicating the result; all diagnostic output
+goes to stderr.
 
-If `algif_aead` is not already loaded, the script exits with a notice
-by default. Pass `--load-module` to allow the kernel to autoload it.
-If the module was loaded by the run, a reminder to unload it is printed
-at the end.
+| stdout        | exit code | meaning                                      |
+|---------------|-----------|----------------------------------------------|
+| `VULNERABLE`  | 2         | page-cache scratch-write confirmed           |
+| `NOT VULNERABLE` | 0      | attack vector not reachable on this kernel   |
+| `UNKNOWN`     | 125       | `algif_aead` not loaded; re-run with `--load-module` |
+| *(none)*      | 1         | test error                                   |
+
+If `algif_aead` is not already loaded, the script prints `UNKNOWN` and
+exits 125 by default. Pass `--load-module` to allow the kernel to
+autoload it and proceed with detection. If the module was loaded by the
+run, a reminder to unload it is printed at the end.
 
 ## What it does
 
