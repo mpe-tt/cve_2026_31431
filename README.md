@@ -1,16 +1,57 @@
-# CVE-2026-31431 ("Copy Fail") Toolkit
+# CVE-2026-31431 ("Copy Fail") Detector
 
-Detector and proof-of-concept LPE for the Linux `algif_aead` /
-`authencesn` page-cache scratch-write bug disclosed 2026-04-29.
+Non-destructive detector for the Linux `algif_aead` / `authencesn`
+page-cache scratch-write bug disclosed 2026-04-29.
 
 Disclosure writeup: <https://xint.io/blog/copy-fail-linux-distributions>
 
-## Authorization
+## Usage
 
-Use only on hosts you own or are explicitly engaged to assess. The LPE
-modifies in-memory state (page cache) but the technique is real
-privilege escalation — running it on systems without authorization is
-illegal in most jurisdictions.
+```sh
+python3 test_cve_2026_31431.py [--load-module]
+```
+
+Requires Python 3.6+. No third-party dependencies.
+
+stdout receives one line: `VULNERABLE` (exit 2) or `NOT VULNERABLE`
+(exit 0). All diagnostic output goes to stderr. Exit 1 means the test
+itself failed.
+
+If `algif_aead` is not already loaded, the script exits with a notice
+by default. Pass `--load-module` to allow the kernel to autoload it.
+If the module was loaded by the run, a reminder to unload it is printed
+at the end.
+
+## What it does
+
+1. Checks whether `algif_aead` is loaded (`/sys/module/algif_aead`).
+2. Confirms `AF_ALG` and the `authencesn(hmac(sha256),cbc(aes))`
+   algorithm are reachable from an unprivileged process.
+3. Creates a 4 KiB sentinel file in a temp directory and populates its
+   page cache.
+4. Sends 8 bytes of AAD inline via `sendmsg`+cmsg with `seqno_lo` set
+   to the marker `PWND`, then splices 32 bytes of the sentinel's
+   page-cache page into the AF_ALG op socket.
+5. Calls `recv()` to drive decryption. The auth check fails with
+   `EBADMSG`; the scratch write fires regardless.
+6. Re-reads the file (page cache, not disk) and checks for the marker.
+
+The sentinel file is removed on exit. `/etc/passwd`, `/usr/bin/su`, and
+all other system files are never opened.
+
+## Mitigation
+
+Until the patched kernel reaches your distro:
+
+```sh
+sudo tee /etc/modprobe.d/disable-algif-aead.conf <<<'install algif_aead /bin/false'
+sudo rmmod algif_aead 2>/dev/null
+```
+
+After applying, the detector should print `NOT VULNERABLE` and exit 0.
+
+The upstream fix reverts in-place AEAD operations to out-of-place,
+keeping page-cache pages out of writable scatterlists.
 
 ## Vulnerability summary
 
@@ -33,85 +74,6 @@ Affected: kernels carrying commit `72548b093ee3` (in-place AEAD, 2017)
 without the upstream revert. The disclosure confirmed Ubuntu 24.04 LTS,
 Amazon Linux 2023, RHEL 14.3, and SUSE 16, but the underlying primitive
 predates that range.
-
-## Files
-
-| File | Purpose |
-| --- | --- |
-| `test_cve_2026_31431.py` | Non-destructive detector. Operates on a sentinel file in a temp dir; never touches system binaries. |
-
-Both scripts are pure Python 3.10+ stdlib.
-
-## Quick start
-
-```sh
-# 1. Detect
-python3 test_cve_2026_31431.py
-#   exit 0 = not vulnerable, 2 = vulnerable, 1 = test error
-```
-
-## Detector usage
-
-```
-python3 test_cve_2026_31431.py
-```
-
-What it does:
-
-1. Confirms `AF_ALG` and the `authencesn(hmac(sha256),cbc(aes))`
-   algorithm are reachable from an unprivileged process.
-2. Creates a 4 KiB sentinel file in a temp directory, populates the
-   page cache.
-3. Sends 8 bytes of AAD inline via `sendmsg`+cmsg with seqno_lo set to
-   the marker `PWND`, then `os.splice()`s 32 bytes of the sentinel's
-   page-cache page into the AF_ALG op socket.
-4. Calls `recv()` to drive decryption. The auth check fails with
-   `EBADMSG`; the scratch write fires regardless.
-5. Re-reads the file (page cache, not disk) and looks for the marker.
-
-Output classes:
-
-- `Precondition not met` — `AF_ALG` or `authencesn` unavailable. Exit 0.
-- `VULNERABLE to CVE-2026-31431` — marker `PWND` landed in the spliced
-  page. Exit 2.
-- `Page cache MODIFIED via in-place AEAD splice path` — the page was
-  written to but the marker did not land at the expected position.
-  Treat as vulnerable. Exit 2.
-- `Page cache intact` — patched. Exit 0.
-
-The detector never touches `/usr/bin/su`, `/etc/passwd`, or any other
-file outside the temp directory it creates, and that file is removed on
-exit.
-
-## How `write4` works
-
-```
-sendmsg([8-byte AAD], cmsg=[ALG_SET_OP=DECRYPT, ALG_SET_IV, ALG_SET_AEAD_ASSOCLEN=8],
-        flags=MSG_MORE)
-splice(target_fd, pipe_w, 32, offset_src=file_offset)
-splice(pipe_r, op_fd, 32)
-recv(op_fd)   # EBADMSG; scratch write has already landed
-```
-
-The 4 bytes from AAD positions 4–7 (`seqno_lo`) are written by
-`authencesn` into the destination scatterlist, which on this code path
-is the page-cache page we spliced from `target_fd`. The landing offset
-within the page corresponds to the `offset_src` we passed to `splice()`.
-
-## Mitigation
-
-Until the patched kernel reaches your distro:
-
-```sh
-sudo tee /etc/modprobe.d/disable-algif-aead.conf <<<'install algif_aead /bin/false'
-sudo rmmod algif_aead 2>/dev/null
-```
-
-After applying, `test_cve_2026_31431.py` should report `Precondition
-not met` and exit 0.
-
-The upstream fix reverts in-place AEAD operations to out-of-place,
-keeping page-cache pages out of writable scatterlists.
 
 ## References
 
