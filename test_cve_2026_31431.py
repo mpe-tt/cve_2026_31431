@@ -45,6 +45,10 @@ def build_authenc_keyblob(authkey: bytes, enckey: bytes) -> bytes:
     return rtattr + keyparam + authkey + enckey
 
 
+def algif_aead_loaded() -> bool:
+    return os.path.isdir("/sys/module/algif_aead")
+
+
 def precheck() -> str | None:
     if not os.path.exists("/proc/crypto"):
         return "/proc/crypto missing"
@@ -151,6 +155,19 @@ def main() -> int:
         print(f"[i] Kernel {os.uname().release} predates the affected "
               f"6.12/6.17/6.18 lines; trigger may not apply even if "
               f"prerequisites match.")
+
+    if algif_aead_loaded():
+        print("[i] algif_aead module is already loaded.")
+    else:
+        print("[i] algif_aead module is NOT currently loaded.")
+        print("[i] Proceeding will cause the kernel to load it automatically.")
+        try:
+            answer = input("[?] Load algif_aead and continue? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer != "y":
+            print("[*] Aborted.")
+            return 0
 
     reason = precheck()
     if reason:
